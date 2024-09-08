@@ -3,12 +3,26 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <time.h>
+#include <stdbool.h>
+
+#ifdef WITH_SECURE_RANDOM
+#ifdef _WIN32
+#error Compiling with secure random not supported on windows
+#endif
+#endif
 
 void help(char* prog);
 void fix_isbn(const char *isbn10);
 void check_and_remove(const char *isbn, char* isbnout, unsigned char minimum);
 unsigned short sum_isbn(const char* isbn, const unsigned char to);
 void check_isbn(const char *isbn);
+
+#ifdef WITH_SECURE_RANDOM
+void random_isbn(bool use_secure_random);
+#else
+void random_isbn(void);
+#endif
 
 int main(const int argc, char *argv[])
 {
@@ -17,20 +31,21 @@ int main(const int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
     int opt;
+    bool do_random = false;
+#ifdef WITH_SECURE_RANDOM
+    bool use_secure_random = false;
+#endif
 
     // put ':' in the starting of the
     // string so that program can
     //distinguish between '?' and ':'
-    while((opt = getopt(argc, argv, "c:f:rh")) != -1)
+    while((opt = getopt(argc, argv, "c:f:rhs")) != -1)
     {
         switch(opt)
         {
             case 'h':
                 help(argv[0]);
                 exit(EXIT_SUCCESS);
-            case 'r':
-                printf("option: %c\n", opt);
-                break;
             case 'f':
                 printf("fixing: %s\n", optarg);
                 fix_isbn(optarg);
@@ -39,26 +54,71 @@ int main(const int argc, char *argv[])
                 printf("Checking ISBN: %s\n", optarg);
                 check_isbn(optarg);
                 break;
+            case 'r':
+                do_random = true;
+                break;
+            case 's':
+#ifdef WITH_SECURE_RANDOM
+                use_secure_random = true;
+                break;
+#else
+                fprintf(stderr,"This binary was compiled without secure random support.");
+                exit(EXIT_FAILURE);
+#endif
             case '?':
                 printf("unknown option: %c\n", optopt);
             break;
             default:
-                printf("unknown option: %c\n", optopt);
+                printf("unknown error.");
         }
     }
 
-    // optind is for the extra arguments
-    // which are not parsed
-    // ReSharper disable once CppDFALoopConditionNotUpdated
-    for(; optind < argc; optind++){
-        printf("extra arguments: %s\n", argv[optind]);
+    if (do_random) {
+#ifdef WITH_SECURE_RANDOM
+        random_isbn(use_secure_random);
+#else
+        random_isbn();
+#endif
     }
 
     return 0;
 }
 
 void help(char *prog) {
+#ifdef WITH_SECURE_RANDOM
+    printf("Usage: %s [options]\nOptions:\n\t-c <isbn>\tCheck an ISBN 10\n\t-r\t\t\tCreate a random ISBN 10\n\t-f <isbn>\tCorrect an invalid ISBN 10\n\t-s\t\t\tUse a more secure and but slightly slower random number generator\n\t-h\t\t\tShow this help.\n", prog);
+#else
     printf("Usage: %s [options]\nOptions:\n\t-c <isbn>\tCheck an ISBN 10\n\t-r\t\t\tCreate a random ISBN 10\n\t-f <isbn>\tCorrect an invalid ISBN 10\n\t-h\t\t\tShow this help.\n", prog);
+#endif
+}
+
+#ifdef WITH_SECURE_RANDOM
+void random_isbn(bool use_secure_random) {
+#else
+void random_isbn(void){
+#endif
+// Use the better random method on platforms that support it.
+#ifdef _WIN32
+srand(time(NULL));
+#define rand_call rand
+#else
+#ifdef WITH_SECURE_RANDOM
+    int addfactor = 0;
+    if (use_secure_random) {
+        FILE* f = fopen("/dev/urandom", "r");
+        addfactor = fgetc(f);
+        fclose(f);
+    }
+    srandom(time(NULL)+addfactor);
+#else
+    srandom(time(NULL));
+#endif
+#define rand_call random
+#endif
+    char isbn_text[10];
+    const int isbn = rand_call()%1000000000;
+    sprintf(isbn_text, "%09d", isbn);
+    fix_isbn(isbn_text);
 }
 
 void check_isbn(const char *isbn) {
@@ -68,9 +128,9 @@ void check_isbn(const char *isbn) {
     unsigned short final = sum_isbn(newisbn, 10);
 
     if (final == 11) {
-        printf("The ISBN %s is Valid.", isbn);
+        printf("The ISBN %s is Valid.\n", isbn);
     } else {
-        printf("The ISBN %s is not Valid. Run with -f to fix it.", isbn);
+        printf("The ISBN %s is not Valid. Run with -f to fix it.\n", isbn);
     }
 
 }
@@ -92,9 +152,9 @@ void fix_isbn(const char *isbn10) {
             printf("%c", newisbn[i]);
         } else {
             if (final != 10) {
-                printf("%i", (int)final);
+                printf("%i\n", (int)final);
             } else {
-                printf("X");
+                printf("X\n");
             }
         }
     }
@@ -131,7 +191,7 @@ void check_and_remove(const char *isbn, char* isbnout, const unsigned char minim
     remove_non_digits(isbn, isbnout);
 
     if (strlen(isbnout) < minimum) {
-        fprintf(stderr, "Invalid ISBN.");
+        fprintf(stderr, "Invalid ISBN.\n");
         exit(EXIT_FAILURE);
     }
 }
